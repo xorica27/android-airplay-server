@@ -1,4 +1,4 @@
-name: Generate APK
+name: Generate APK (local build, no signing secrets)
 
 env:
   main_project_module: app
@@ -6,15 +6,8 @@ env:
 on:
   push:
     branches:
-      - "release/**"
-    tags:
-      - "v*.*.*"
+      - "build/**"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "v*.*.*"
-        required: true
-        type: string
 
 jobs:
   build:
@@ -24,16 +17,6 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set TAG
-        if: github.event_name == 'push'
-        run: |
-          echo "version=$(echo '${{ github.ref_name }}' | awk -F 'v' '{print $2}')" >> $GITHUB_ENV
-
-      - name: Set TAG
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "version=$(echo '${{ inputs.version }}' | awk -F 'v' '{print $2}')" >> $GITHUB_ENV
-
       - name: Use JDK
         uses: actions/setup-java@v4
         with:
@@ -41,21 +24,17 @@ jobs:
           java-version: "21"
           cache: "gradle"
 
-      - name: Build
+      # assembleDebug is deliberate: it is signed with the standard debug key, so the build needs
+      # no keystore secrets, and it builds every ABI including 32-bit armeabi-v7a for TVs that
+      # cannot install arm64-only APKs.
+      - name: Build debug APK
         run: |
-          export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
-          echo ${{ secrets.STORE }} | base64 -d > upload.jks
-          echo ${{ secrets.LOCAL }} | base64 -d > local.properties
-          chmod +x ./gradlew;
-          ./gradlew assembleRelease bundleRelease --stacktrace
-          rm upload.jks local.properties
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --stacktrace
 
-      - name: Publish (GitHub)
-        uses: softprops/action-gh-release@v2
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: v${{ env.version }}
-          tag_name: v${{ env.version }}
-          files: |
-            ${{ env.main_project_module }}/build/outputs/apk/release/app-release.apk
-            ${{ env.main_project_module }}/build/outputs/bundle/release/app-release.aab
+          name: app-debug-apk
+          path: ${{ env.main_project_module }}/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
